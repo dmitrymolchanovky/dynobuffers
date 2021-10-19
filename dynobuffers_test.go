@@ -9,6 +9,7 @@ package dynobuffers
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -131,6 +132,106 @@ weight: int64
 	}
 	b.Release()
 	require.Zero(t, GetObjectsInUse())
+}
+
+// MDA тестирование записи в буфер данных с дочерней повторяющейся сущностью
+// с последующим чтением этих данных из буфера
+// В качестве данных взят некий заказ, содержащий в себе список товаров
+func TestBasic_Nested(t *testing.T) {
+	// описание схемы заказа
+	var orderYaml = `
+order_name: string
+order_weight: int32
+order_cost: float32
+good..:
+  good_name: string
+  good_weight: int32
+  good_cost: float32
+order_id: int64
+order_paid: bool
+`
+	// описание схемы товара из заказа
+	var goodYaml = `
+good_name: string
+good_weight: int32
+good_cost: float32
+`
+
+	var (
+		err                     error
+		orderScheme, goodScheme *Scheme
+	)
+
+	// создадим рутовую схему заказа
+	orderScheme, err = YamlToScheme(orderYaml)
+	require.Nil(t, err)
+
+	// создадим схему товара
+	goodScheme, err = YamlToScheme(goodYaml)
+	require.Nil(t, err)
+
+	// создадим буфер и запишем в него основные данные заказа
+	order := NewBuffer(orderScheme)
+
+	// запишем в буфер основные данные заказа
+	order.Set("order_name", "a box of food")
+	order.Set("order_weight", 10)
+	order.Set("order_cost", 24.32)
+	order.Set("order_id", 666)
+	order.Set("order_paid", true)
+
+	// сформируем 2 буфера с данными товаров
+	goods := make([]*Buffer, 2)
+
+	// первый товар
+	good := NewBuffer(goodScheme)
+	good.Set("good_name", "nuggets")
+	good.Set("good_weight", 4)
+	good.Set("cost", 14.32)
+	goods = append(goods, good)
+	good.Release()
+
+	// второй товар
+	good = NewBuffer(goodScheme)
+	good.Set("good_name", "cola")
+	good.Set("good_weight", 6)
+	good.Set("cost", 10)
+	goods = append(goods, good)
+	good.Release()
+
+	// поместим в буфер заказа nested данные двух товаров
+	order.Set("good..", goods)
+
+	// выгрузим буфер в срез байтов
+	var bytes []byte
+	bytes, err = order.ToBytes()
+
+	order.Release()
+	require.Nil(t, err)
+	require.NotNil(t, bytes)
+
+	// зачитаем данные в буфер из среза байтов
+	//и проверим, что в буфере верные данные
+	order = ReadBuffer(bytes, orderScheme)
+	require.Equal(t, "a box of food", order.Get("order_name").(string))
+	require.Equal(t, int32(10), order.Get("order_weight").(int32))
+	require.Equal(t, float32(24.32), order.Get("order_cost").(float32))
+	require.Equal(t, bool(true), order.Get("order_paid").(bool))
+	require.Equal(t, int64(666), order.Get("order_id").(int64))
+
+	// это лишнее, но не удержался
+	fmt.Println("Order -------------")
+	fmt.Println(" name:", order.Get("order_name"))
+	fmt.Println(" weight:", order.Get("order_weight"))
+	fmt.Println(" cost:", order.Get("order_cost"))
+	fmt.Println(" paid:", order.Get("order_paid"))
+	fmt.Println(" id:", order.Get("order_id"))
+	fmt.Println("-------------------")
+
+	// TODO: пока не понял, как зачитать nested данные, разбираюсь...
+	//	bytes = order.GetByteArray("good..")
+
+	order.Release()
 }
 
 var schemeStr = `
