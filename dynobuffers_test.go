@@ -9,7 +9,6 @@ package dynobuffers
 
 import (
 	"encoding/json"
-	"fmt"
 	"reflect"
 	"testing"
 
@@ -137,24 +136,18 @@ weight: int64
 // MDA тестирование записи в буфер данных с дочерней повторяющейся сущностью
 // с последующим чтением этих данных из буфера
 // В качестве данных взят некий заказ, содержащий в себе список товаров
-func TestBasic_Nested(t *testing.T) {
+func TestBasicUsage_Nested(t *testing.T) {
 	// описание схемы заказа
 	var orderYaml = `
-order_name: string
-order_weight: int32
-order_cost: float32
+name: string
+weight: int32
+cost: float32
 good..:
-  good_name: string
-  good_weight: int32
-  good_cost: float32
-order_id: int64
-order_paid: bool
-`
-	// описание схемы товара из заказа
-	var goodYaml = `
-good_name: string
-good_weight: int32
-good_cost: float32
+  name: string
+  weight: int32
+  cost: float32
+id: int64
+paid: bool
 `
 
 	var (
@@ -167,71 +160,69 @@ good_cost: float32
 	require.Nil(t, err)
 
 	// создадим схему товара
-	goodScheme, err = YamlToScheme(goodYaml)
-	require.Nil(t, err)
+	goodScheme = orderScheme.GetNestedScheme("good")
+	require.NotNil(t, goodScheme)
 
 	// создадим буфер и запишем в него основные данные заказа
 	order := NewBuffer(orderScheme)
 
 	// запишем в буфер основные данные заказа
-	order.Set("order_name", "a box of food")
-	order.Set("order_weight", 10)
-	order.Set("order_cost", 24.32)
-	order.Set("order_id", 666)
-	order.Set("order_paid", true)
+	order.Set("name", "a box of food")
+	order.Set("weight", 10)
+	order.Set("cost", 24.32)
+	order.Set("id", 666)
+	order.Set("paid", true)
 
-	// сформируем 2 буфера с данными товаров
-	goods := make([]*Buffer, 2)
+	// сформируем буфер для двух товаров
+	goods := make([]*Buffer, 0, 2)
 
 	// первый товар
 	good := NewBuffer(goodScheme)
-	good.Set("good_name", "nuggets")
-	good.Set("good_weight", 4)
+	good.Set("name", "nuggets")
+	good.Set("weight", 4)
 	good.Set("cost", 14.32)
 	goods = append(goods, good)
-	good.Release()
 
 	// второй товар
 	good = NewBuffer(goodScheme)
-	good.Set("good_name", "cola")
-	good.Set("good_weight", 6)
+	good.Set("name", "cola")
+	good.Set("weight", 6)
 	good.Set("cost", 10)
 	goods = append(goods, good)
-	good.Release()
 
 	// поместим в буфер заказа nested данные двух товаров
-	order.Set("good..", goods)
+	order.Set("good", goods)
 
 	// выгрузим буфер в срез байтов
 	var bytes []byte
 	bytes, err = order.ToBytes()
 
-	order.Release()
 	require.Nil(t, err)
 	require.NotNil(t, bytes)
 
-	// зачитаем данные в буфер из среза байтов
+	// зачитаем данные в новый буфер из среза байтов
 	//и проверим, что в буфере верные данные
-	order = ReadBuffer(bytes, orderScheme)
-	require.Equal(t, "a box of food", order.Get("order_name").(string))
-	require.Equal(t, int32(10), order.Get("order_weight").(int32))
-	require.Equal(t, float32(24.32), order.Get("order_cost").(float32))
-	require.Equal(t, bool(true), order.Get("order_paid").(bool))
-	require.Equal(t, int64(666), order.Get("order_id").(int64))
+	newOrder := ReadBuffer(bytes, orderScheme)
+	require.Equal(t, "a box of food", newOrder.Get("name"))
+	require.Equal(t, int32(10), newOrder.Get("weight"))
+	require.Equal(t, float32(24.32), newOrder.Get("cost"))
+	require.Equal(t, bool(true), newOrder.Get("paid"))
+	require.Equal(t, int64(666), newOrder.Get("id"))
 
-	// это лишнее, но не удержался
-	fmt.Println("Order -------------")
-	fmt.Println(" name:", order.Get("order_name"))
-	fmt.Println(" weight:", order.Get("order_weight"))
-	fmt.Println(" cost:", order.Get("order_cost"))
-	fmt.Println(" paid:", order.Get("order_paid"))
-	fmt.Println(" id:", order.Get("order_id"))
-	fmt.Println("-------------------")
-
-	// TODO: пока не понял, как зачитать nested данные, разбираюсь...
-	//	bytes = order.GetByteArray("good..")
+	goodsArr := newOrder.Get("good").(*ObjectArray)
+	if goodsArr.Next() {
+		require.Equal(t, "nuggets", goodsArr.Buffer.Get("name"))
+		require.Equal(t, int32(4), goodsArr.Buffer.Get("weight"))
+		require.Equal(t, float32(14.32), goodsArr.Buffer.Get("cost"))
+	}
+	if goodsArr.Next() {
+		require.Equal(t, "cola", goodsArr.Buffer.Get("name"))
+		require.Equal(t, int32(6), goodsArr.Buffer.Get("weight"))
+		require.Equal(t, float32(10), goodsArr.Buffer.Get("cost"))
+	}
 
 	order.Release()
+	newOrder.Release()
 }
 
 var schemeStr = `
