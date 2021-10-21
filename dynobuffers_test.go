@@ -220,9 +220,12 @@ paid: bool
 		require.Equal(t, int32(6), goodsArr.Buffer.Get("weight"))
 		require.Equal(t, float32(10), goodsArr.Buffer.Get("cost"))
 	}
+	require.False(t, goodsArr.Next())
 
-	order.Release()
 	newOrder.Release()
+	order.Release()
+
+	require.Zero(t, GetObjectsInUse())
 }
 
 var schemeStr = `
